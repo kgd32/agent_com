@@ -24,6 +24,7 @@ export interface SendMessageParams {
     threadId?: string;
     importance?: 'low' | 'normal' | 'high';
     ackRequired?: boolean;
+    bypassPolicy?: boolean;
 }
 
 export class MessageManager {
@@ -42,9 +43,11 @@ export class MessageManager {
             const recipient = this.agents.whois(params.projectSlug, recipientName);
             if (!recipient) throw new Error(`Recipient agent '${recipientName}' not found`);
 
-            const canMsg = this.contacts.canMessage(sender.projectId, sender.id, recipient.id, recipient.contactPolicy);
-            if (!canMsg) {
-                throw new Error(`Contact policy violation: Agent '${params.from}' cannot message '${recipientName}'. request_contact first.`);
+            if (!params.bypassPolicy) {
+                const canMsg = this.contacts.canMessage(sender.projectId, sender.id, recipient.id, recipient.contactPolicy);
+                if (!canMsg) {
+                    throw new Error(`Contact policy violation: Agent '${params.from}' cannot message '${recipientName}'. request_contact first.`);
+                }
             }
 
             recipientIds.push(recipient.id);

@@ -6,6 +6,7 @@ import { AgentMailDB } from '../core/database.js';
 import { AgentManager } from '../core/agents.js';
 import { MessageManager } from '../core/messages.js';
 import { ContactManager } from '../core/contacts.js';
+import { HumanOverseer } from '../human/overseer.js';
 import * as path from 'path';
 
 // Config
@@ -16,6 +17,7 @@ const db = new AgentMailDB({ path: DB_PATH });
 const agents = new AgentManager(db);
 const contacts = new ContactManager(db);
 const messages = new MessageManager(db, agents, contacts);
+const overseer = new HumanOverseer(db, agents, messages);
 
 const server = new Server(
     {
@@ -128,6 +130,55 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     },
                     required: ["projectSlug", "agentName"]
                 }
+            },
+            // Human Oversight Tools
+            {
+                name: "send_human_message",
+                description: "Send a high-priority message from Human Overseer to agents.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        projectSlug: { type: "string" },
+                        subject: { type: "string" },
+                        body: { type: "string" },
+                        to: { type: "array", items: { type: "string" }, description: "Optional list of agent names. Defaults to all." }
+                    },
+                    required: ["projectSlug", "subject", "body"]
+                }
+            },
+            {
+                name: "request_human_approval",
+                description: "Request human approval for an action.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        projectSlug: { type: "string" },
+                        entityType: { type: "string" },
+                        entityId: { type: "number" }
+                    },
+                    required: ["projectSlug", "entityType", "entityId"]
+                }
+            },
+            {
+                name: "list_pending_approvals",
+                description: "List pending human approvals.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                }
+            },
+            {
+                name: "resolve_approval",
+                description: "Approve or reject a request.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        approvalId: { type: "number" },
+                        decision: { type: "string", enum: ["approved", "rejected"] },
+                        note: { type: "string" }
+                    },
+                    required: ["approvalId", "decision"]
+                }
             }
         ]
     };
@@ -191,6 +242,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
                 const list = contacts.listContacts(agent.projectId, agent.id);
                 return { content: [{ type: "text", text: JSON.stringify(list, null, 2) }] };
+            }
+            case "send_human_message": {
+                const params = args as any;
+                const msg = overseer.broadcast(params);
+                return { content: [{ type: "text", text: JSON.stringify(msg, null, 2) }] };
+            }
+            case "request_human_approval": {
+                const params = args as any;
+                const app = overseer.requestApproval(params.entityType, params.entityId);
+                return { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+            }
+            case "list_pending_approvals": {
+                const apps = overseer.listPendingApprovals();
+                return { content: [{ type: "text", text: JSON.stringify(apps, null, 2) }] };
+            }
+            case "resolve_approval": {
+                const params = args as any;
+                const app = overseer.resolveApproval(params.approvalId, params.decision, params.note);
+                return { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
             }
             default:
                 throw new Error(`Unknown tool: ${name}`);
