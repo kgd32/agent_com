@@ -10,6 +10,8 @@ import { HumanOverseer } from '../human/overseer.js';
 import { BeadsIntegration } from '../integrations/beads.js';
 import { logger } from '../utils/logger.js';
 import * as path from 'path';
+import express from 'express';
+import { createApi } from './api.js';
 
 // Config
 const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'agent-mail.db');
@@ -27,6 +29,10 @@ const contacts = new ContactManager(db);
 const messages = new MessageManager(db, agents, contacts);
 const overseer = new HumanOverseer(db, agents, messages);
 const beads = new BeadsIntegration(db, agents, messages);
+
+const app = express();
+const API_PORT = process.env.API_PORT || 3001;
+app.use('/api', createApi(db, agents, messages, contacts, beads, overseer));
 
 const server = new Server(
     {
@@ -414,6 +420,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 async function run() {
+    // Start Express API
+    app.listen(API_PORT, () => {
+        logger.info('api_startup', { port: API_PORT });
+        console.error(`Agent Mail API running on port ${API_PORT}`);
+    });
+
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Agent Mail MCP Server running on stdio");
