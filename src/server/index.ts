@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { AgentMailDB } from '../core/database.js';
 import { AgentManager } from '../core/agents.js';
@@ -8,12 +8,19 @@ import { MessageManager } from '../core/messages.js';
 import { ContactManager } from '../core/contacts.js';
 import { HumanOverseer } from '../human/overseer.js';
 import { BeadsIntegration } from '../integrations/beads.js';
+import { logger } from '../utils/logger.js';
 import * as path from 'path';
 
 // Config
 const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'agent-mail.db');
 
 // Initialize Core
+try {
+    logger.info('system_startup', { dbPath: DB_PATH });
+} catch (e) {
+    console.error("Failed to init logger", e);
+}
+
 const db = new AgentMailDB({ path: DB_PATH });
 const agents = new AgentManager(db);
 const contacts = new ContactManager(db);
@@ -29,9 +36,48 @@ const server = new Server(
     {
         capabilities: {
             tools: {},
+            resources: {},
         },
     }
 );
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    return {
+        resources: [
+            {
+                uri: "resource://dashboard",
+                name: "Agent Mail Dashboard",
+                mimeType: "application/json",
+                description: "Real-time metrics and system health"
+            }
+        ]
+    };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const uri = request.params.uri;
+    if (uri === "resource://dashboard") {
+        const agentList = agents.list('demo'); // Hardcoded default project for now
+        const pendingApprovals = overseer.listPendingApprovals();
+
+        // Simple metrics gathering
+        const metrics = {
+            active_agents: agentList.length,
+            pending_approvals: pendingApprovals.length,
+            timestamp: new Date().toISOString(),
+            status: 'healthy'
+        };
+
+        return {
+            contents: [{
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify(metrics, null, 2)
+            }]
+        };
+    }
+    throw new Error(`Resource not found: ${uri}`);
+});
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
@@ -227,36 +273,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const correlationId = Math.random().toString(36).substr(2, 9);
+
+    logger.info('tool_call_start', { correlationId, name, args });
 
     try {
+        let result: any;
         switch (name) {
             case "register_agent": {
                 const params = args as any;
                 const agent = agents.register(params);
-                return {
+                result = {
                     content: [{ type: "text", text: JSON.stringify(agent, null, 2) }]
                 };
+                break;
             }
             case "send_message": {
                 const params = args as any;
                 const msg = messages.send(params);
-                return {
+                result = {
                     content: [{ type: "text", text: JSON.stringify(msg, null, 2) }]
                 };
+                break;
             }
             case "fetch_inbox": {
                 const params = args as any;
                 const msgs = messages.fetchInbox(params.projectSlug, params.agentName, params.limit);
-                return {
+                result = {
                     content: [{ type: "text", text: JSON.stringify(msgs, null, 2) }]
                 };
+                break;
             }
             case "list_agents": {
                 const params = args as any;
                 const list = agents.list(params.projectSlug);
-                return {
+                result = {
                     content: [{ type: "text", text: JSON.stringify(list, null, 2) }]
                 };
+                break;
             }
             case "request_contact": {
                 const params = args as any;
@@ -264,8 +318,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const target = agents.whois(params.projectSlug, params.to);
                 if (!sender || !target) throw new Error("Agent not found");
 
-                const result = contacts.requestContact(sender.projectId, sender.id, target.id, params.reason);
-                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+                const res = contacts.requestContact(sender.projectId, sender.id, target.id, params.reason);
+                result = { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+                break;
             }
             case "respond_contact": {
                 const params = args as any;
@@ -273,8 +328,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const requester = agents.whois(params.projectSlug, params.to);
                 if (!responder || !requester) throw new Error("Agent not found");
 
-                const result = contacts.respondContact(responder.projectId, requester.id, responder.id, params.decision);
-                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+                const res = contacts.respondContact(responder.projectId, requester.id, responder.id, params.decision);
+                result = { content: [{ type: "text", text: JSON.stringify(res, null, 2) }] };
+                break;
             }
             case "list_contacts": {
                 const params = args as any;
@@ -282,46 +338,59 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (!agent) throw new Error("Agent not found");
 
                 const list = contacts.listContacts(agent.projectId, agent.id);
-                return { content: [{ type: "text", text: JSON.stringify(list, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(list, null, 2) }] };
+                break;
             }
             case "send_human_message": {
                 const params = args as any;
                 const msg = overseer.broadcast(params);
-                return { content: [{ type: "text", text: JSON.stringify(msg, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(msg, null, 2) }] };
+                break;
             }
             case "request_human_approval": {
                 const params = args as any;
                 const app = overseer.requestApproval(params.entityType, params.entityId);
-                return { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+                break;
             }
             case "list_pending_approvals": {
                 const apps = overseer.listPendingApprovals();
-                return { content: [{ type: "text", text: JSON.stringify(apps, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(apps, null, 2) }] };
+                break;
             }
             case "resolve_approval": {
                 const params = args as any;
                 const app = overseer.resolveApproval(params.approvalId, params.decision, params.note);
-                return { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+                break;
             }
             case "link_task_to_thread": {
                 const params = args as any;
                 await beads.linkTaskToThread(params.projectSlug, params.taskId, params.threadId);
-                return { content: [{ type: "text", text: "Task linked successfully" }] };
+                result = { content: [{ type: "text", text: "Task linked successfully" }] };
+                break;
             }
             case "update_task_status": {
                 const params = args as any;
                 const task = await beads.updateTaskStatus(params.projectSlug, params.agentName, params.taskId, params.status, params.note);
-                return { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+                break;
             }
             case "list_tasks": {
                 const params = args as any;
                 const tasks = await beads.listTasks(params.agentName);
-                return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
+                result = { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
+                break;
             }
             default:
                 throw new Error(`Unknown tool: ${name}`);
         }
+
+        logger.info('tool_call_success', { correlationId, name });
+        return result;
+
     } catch (error: any) {
+        logger.error('tool_call_failed', { correlationId, name, error: error.message, stack: error.stack });
         return {
             content: [{ type: "text", text: `Error: ${error.message}` }],
             isError: true,
@@ -336,6 +405,7 @@ async function run() {
 }
 
 run().catch((error) => {
+    logger.error("fatal_server_error", { error: error.message });
     console.error("Fatal error:", error);
     process.exit(1);
 });
