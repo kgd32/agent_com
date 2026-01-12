@@ -7,6 +7,7 @@ import { AgentManager } from '../core/agents.js';
 import { MessageManager } from '../core/messages.js';
 import { ContactManager } from '../core/contacts.js';
 import { HumanOverseer } from '../human/overseer.js';
+import { BeadsIntegration } from '../integrations/beads.js';
 import * as path from 'path';
 
 // Config
@@ -18,6 +19,7 @@ const agents = new AgentManager(db);
 const contacts = new ContactManager(db);
 const messages = new MessageManager(db, agents, contacts);
 const overseer = new HumanOverseer(db, agents, messages);
+const beads = new BeadsIntegration(db, agents, messages);
 
 const server = new Server(
     {
@@ -179,6 +181,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     },
                     required: ["approvalId", "decision"]
                 }
+            },
+            // Beads Integration Tools
+            {
+                name: "link_task_to_thread",
+                description: "Link a Beads task to a conversation thread.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        projectSlug: { type: "string" },
+                        taskId: { type: "string" },
+                        threadId: { type: "string" }
+                    },
+                    required: ["projectSlug", "taskId", "threadId"]
+                }
+            },
+            {
+                name: "update_task_status",
+                description: "Update a Beads task status and announce it.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        projectSlug: { type: "string" },
+                        agentName: { type: "string" },
+                        taskId: { type: "string" },
+                        status: { type: "string", enum: ["todo", "in_progress", "done"] },
+                        note: { type: "string" }
+                    },
+                    required: ["projectSlug", "agentName", "taskId", "status"]
+                }
+            },
+            {
+                name: "list_tasks",
+                description: "List tasks from Beads.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        agentName: { type: "string", description: "Filter by assignee (optional)" }
+                    }
+                }
             }
         ]
     };
@@ -261,6 +302,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const params = args as any;
                 const app = overseer.resolveApproval(params.approvalId, params.decision, params.note);
                 return { content: [{ type: "text", text: JSON.stringify(app, null, 2) }] };
+            }
+            case "link_task_to_thread": {
+                const params = args as any;
+                await beads.linkTaskToThread(params.projectSlug, params.taskId, params.threadId);
+                return { content: [{ type: "text", text: "Task linked successfully" }] };
+            }
+            case "update_task_status": {
+                const params = args as any;
+                const task = await beads.updateTaskStatus(params.projectSlug, params.agentName, params.taskId, params.status, params.note);
+                return { content: [{ type: "text", text: JSON.stringify(task, null, 2) }] };
+            }
+            case "list_tasks": {
+                const params = args as any;
+                const tasks = await beads.listTasks(params.agentName);
+                return { content: [{ type: "text", text: JSON.stringify(tasks, null, 2) }] };
             }
             default:
                 throw new Error(`Unknown tool: ${name}`);
