@@ -1,5 +1,6 @@
 import { AgentMailDB } from './database.js';
 import { AgentManager } from './agents.js';
+import { ContactManager } from './contacts.js';
 
 export interface Message {
     id: number;
@@ -28,7 +29,8 @@ export interface SendMessageParams {
 export class MessageManager {
     constructor(
         private db: AgentMailDB,
-        private agents: AgentManager
+        private agents: AgentManager,
+        private contacts: ContactManager
     ) { }
 
     send(params: SendMessageParams): Message {
@@ -39,7 +41,12 @@ export class MessageManager {
         for (const recipientName of params.to) {
             const recipient = this.agents.whois(params.projectSlug, recipientName);
             if (!recipient) throw new Error(`Recipient agent '${recipientName}' not found`);
-            // TODO: Check contact policy here
+
+            const canMsg = this.contacts.canMessage(sender.projectId, sender.id, recipient.id, recipient.contactPolicy);
+            if (!canMsg) {
+                throw new Error(`Contact policy violation: Agent '${params.from}' cannot message '${recipientName}'. request_contact first.`);
+            }
+
             recipientIds.push(recipient.id);
         }
 
