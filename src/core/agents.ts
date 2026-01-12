@@ -68,10 +68,31 @@ export class AgentManager {
     }
 
     list(projectSlug: string): Agent[] {
-        const projectId = this.getProjectId(projectSlug);
-        const stmt = this.db.instance.prepare('SELECT * FROM agents WHERE project_id = ? ORDER BY last_active_at DESC');
-        const rows = stmt.all(projectId) as any[];
+        const project = this.getProject(projectSlug);
+        if (!project) return [];
+
+        const stmt = this.db.instance.prepare(`
+        SELECT * FROM agents
+        WHERE project_id = ?
+        ORDER BY last_active_at DESC
+    `);
+
+        const rows = stmt.all(project.id) as any[];
         return rows.map(this.mapRowToAgent);
+    }
+
+    listProjects(): { id: number; slug: string; humanName: string }[] {
+        const stmt = this.db.instance.prepare(`
+        SELECT id, slug, human_name as humanName
+        FROM projects
+        ORDER BY slug ASC
+    `);
+        return stmt.all() as any[];
+    }
+
+    private getProject(slug: string): { id: number } | undefined {
+        const stmt = this.db.instance.prepare('SELECT id FROM projects WHERE slug = ?');
+        return stmt.get(slug) as { id: number } | undefined;
     }
 
     private generateName(): string {

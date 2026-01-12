@@ -9,9 +9,11 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc",
-    "start": "node dist/server/index.js"
+    "start": "node dist/server/index.js",
+    "inspector": "npx @modelcontextprotocol/inspector node dist/server/index.js"
   },
   "devDependencies": {
+    "@modelcontextprotocol/inspector": "^0.18.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.6",
     "ts-node": "^10.9.2",

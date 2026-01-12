@@ -140,6 +140,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 }
             },
             {
+                name: "list_projects",
+                description: "List all available projects.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                }
+            },
+            {
                 name: "request_contact",
                 description: "Request permission to contact another agent.",
                 inputSchema: {
@@ -307,6 +315,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case "list_agents": {
                 const params = args as any;
                 const list = agents.list(params.projectSlug);
+                result = {
+                    content: [{ type: "text", text: JSON.stringify(list, null, 2) }]
+                };
+                break;
+            }
+            case "list_projects": {
+                const list = agents.listProjects();
                 result = {
                     content: [{ type: "text", text: JSON.stringify(list, null, 2) }]
                 };
