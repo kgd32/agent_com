@@ -44,6 +44,24 @@ export function createApi(
         }
     });
 
+    router.post('/agents', (req, res) => {
+        try {
+            const { projectSlug, name, program, model, contactPolicy } = req.body;
+            if (!projectSlug) return res.status(400).json({ error: 'projectSlug required' });
+
+            const agent = agents.register({
+                projectSlug,
+                name,
+                program: program || 'unknown',
+                model: model || 'unknown',
+                contactPolicy: contactPolicy || 'auto'
+            });
+            res.json(agent);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
     // Messages (Inbox/Project view)
     router.get('/messages', (req, res) => {
         try {
@@ -57,7 +75,8 @@ export function createApi(
             }
 
             if (agent && typeof agent === 'string') {
-                const msgs = messages.fetchInbox(project, agent, Number(limit) || 50);
+                const unreadOnly = req.query.unreadOnly === 'true';
+                const msgs = messages.fetchInbox(project, agent, Number(limit) || 50, unreadOnly);
                 return res.json(msgs);
             }
 
@@ -96,6 +115,138 @@ export function createApi(
         } catch (e: any) {
             res.status(500).json({ error: e.message });
         }
+    });
+
+    // Send Message
+    router.post('/messages', (req, res) => {
+        try {
+            const { projectSlug, from, to, subject, body, threadId, importance, ackRequired } = req.body;
+
+            if (!projectSlug || !from || !to || !subject || !body) {
+                return res.status(400).json({ error: 'Missing required fields: projectSlug, from, to, subject, body' });
+            }
+
+            // Auto-register HumanOverseer if it doesn't exist
+            if (from === 'HumanOverseer' && !agents.whois(projectSlug, 'HumanOverseer')) {
+                agents.register({
+                    projectSlug,
+                    name: 'HumanOverseer',
+                    program: 'human',
+                    model: 'human',
+                    contactPolicy: 'open'
+                });
+            }
+
+            const message = messages.send({
+                projectSlug,
+                from,
+                to: Array.isArray(to) ? to : [to],
+                subject,
+                body,
+                threadId,
+                importance: importance || 'normal',
+                ackRequired: ackRequired || false,
+                bypassPolicy: from === 'HumanOverseer' // Human can message anyone
+            });
+
+            res.json(message);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Reply to Thread
+    router.post('/messages/:threadId/reply', (req, res) => {
+        try {
+            const { threadId } = req.params;
+            const { projectSlug, from, to, body, importance, ackRequired } = req.body;
+
+            if (!projectSlug || !from || !to || !body) {
+                return res.status(400).json({ error: 'Missing required fields: projectSlug, from, to, body' });
+            }
+
+            // Auto-register HumanOverseer if it doesn't exist
+            if (from === 'HumanOverseer' && !agents.whois(projectSlug, 'HumanOverseer')) {
+                agents.register({
+                    projectSlug,
+                    name: 'HumanOverseer',
+                    program: 'human',
+                    model: 'human',
+                    contactPolicy: 'open'
+                });
+            }
+
+            // Get the original thread to inherit subject
+            const threadMessages = messages.fetchThread(projectSlug, threadId);
+            if (threadMessages.length === 0) {
+                return res.status(404).json({ error: 'Thread not found' });
+            }
+
+            const subject = threadMessages[0].subject;
+
+            const message = messages.send({
+                projectSlug,
+                from,
+                to: Array.isArray(to) ? to : [to],
+                subject: `Re: ${subject}`,
+                body,
+                threadId,
+                importance: importance || 'normal',
+                ackRequired: ackRequired || false,
+                bypassPolicy: from === 'HumanOverseer' // Human can message anyone
+            });
+
+            res.json(message);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Broadcast Message
+    router.post('/broadcast', (req, res) => {
+        try {
+            const { projectSlug, subject, body, to } = req.body;
+
+            if (!projectSlug || !subject || !body) {
+                return res.status(400).json({ error: 'Missing required fields: projectSlug, subject, body' });
+            }
+
+            const message = overseer.broadcast({ projectSlug, subject, body, to });
+            res.json(message);
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Mark Messages as Read
+    router.post('/messages/read', (req, res) => {
+        try {
+            const { projectSlug, agentName, messageIds } = req.body;
+            if (!projectSlug || !agentName || !Array.isArray(messageIds)) {
+                return res.status(400).json({ error: 'Missing required fields: projectSlug, agentName, messageIds[]' });
+            }
+
+            messages.markAsRead(projectSlug, agentName, messageIds);
+            res.json({ success: true, count: messageIds.length });
+        } catch (e: any) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    // Drafts Management (using localStorage on frontend, but API for future server-side storage)
+    router.get('/messages/drafts', (req, res) => {
+        // For now, return empty array - drafts are client-side only
+        res.json([]);
+    });
+
+    router.post('/messages/drafts', (req, res) => {
+        // For now, just acknowledge - drafts are client-side only
+        res.json({ success: true, message: 'Draft saved (client-side)' });
+    });
+
+    router.delete('/messages/drafts/:id', (req, res) => {
+        // For now, just acknowledge - drafts are client-side only
+        res.json({ success: true, message: 'Draft deleted (client-side)' });
     });
 
     // Beads Tasks

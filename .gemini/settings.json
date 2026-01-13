@@ -1,0 +1,32 @@
+{
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "name": "check-mail-startup",
+                        "type": "command",
+                        "command": "bash \"C:/Users/Kimpa/Documents/Vibe/agent_com/.gemini/hooks/check-mail-start.sh\"",
+                        "description": "Check CodeWizard's agent mail at session start",
+                        "timeout": 5000
+                    }
+                ]
+            }
+        ],
+        "AfterTool": [
+            {
+                "matcher": "task_boundary",
+                "hooks": [
+                    {
+                        "name": "check-mail-milestone",
+                        "type": "command",
+                        "command": "bash \"C:/Users/Kimpa/Documents/Vibe/agent_com/.gemini/hooks/check-mail-after.sh\"",
+                        "description": "Check mail after task completions",
+                        "timeout": 5000
+                    }
+                ]
+            }
+        ]
+    }
+}

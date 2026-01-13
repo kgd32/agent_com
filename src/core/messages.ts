@@ -88,22 +88,42 @@ export class MessageManager {
         return this.mapRowToMessage(msgRow, sender.name);
     }
 
-    fetchInbox(projectSlug: string, agentName: string, limit = 20): Message[] {
+    fetchInbox(projectSlug: string, agentName: string, limit = 20, unreadOnly = false): Message[] {
         const agent = this.agents.whois(projectSlug, agentName);
         if (!agent) throw new Error(`Agent '${agentName}' not found`);
 
-        const stmt = this.db.instance.prepare(`
+        let query = `
       SELECT m.*, a.name as sender_name
       FROM messages m
       JOIN message_recipients mr ON m.id = mr.message_id
       JOIN agents a ON m.from_agent_id = a.id
       WHERE mr.agent_id = ?
-      ORDER BY m.created_at DESC
-      LIMIT ?
-    `);
+    `;
 
+        if (unreadOnly) {
+            query += ` AND mr.read_at IS NULL`;
+        }
+
+        query += ` ORDER BY m.created_at DESC LIMIT ?`;
+
+        const stmt = this.db.instance.prepare(query);
         const rows = stmt.all(agent.id, limit) as any[];
         return rows.map(r => this.mapRowToMessage(r, r.sender_name));
+    }
+
+    markAsRead(projectSlug: string, agentName: string, messageIds: number[]): void {
+        const agent = this.agents.whois(projectSlug, agentName);
+        if (!agent) throw new Error(`Agent '${agentName}' not found`);
+
+        if (messageIds.length === 0) return;
+
+        const update = this.db.instance.prepare(`
+            UPDATE message_recipients
+            SET read_at = strftime('%s', 'now')
+            WHERE agent_id = ? AND message_id IN (${messageIds.map(() => '?').join(',')})
+        `);
+
+        update.run(agent.id, ...messageIds);
     }
 
     fetchThread(projectSlug: string, threadId: string): Message[] {

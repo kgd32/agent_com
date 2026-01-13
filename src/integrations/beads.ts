@@ -126,7 +126,8 @@ export class BeadsIntegration {
         return tasks.map(t => ({
             id: t.id,
             title: t.title,
-            status: t.status,
+            // Map 'open' to 'todo' for frontend compatibility
+            status: t.status === 'open' ? 'todo' : t.status,
             priority: t.priority,
             assignee: t.assignees?.[0]
         }));
